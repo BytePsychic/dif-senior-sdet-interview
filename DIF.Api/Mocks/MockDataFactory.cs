@@ -364,9 +364,9 @@ public static class MockDataFactory
             StyleCode = l.Identifier.Split('-')[0]
         }).ToList();
 
-        var subtotal = lines.Sum(l => l.LineTotal);
+        var subtotal = lines.Sum(l => l.Price);
         var shipping = Math.Round(8.50m + (lines.Sum(l => l.Quantity) * 0.25m), 2);
-        var tax = Math.Round(subtotal * 0.07m, 2);
+        var tax = Math.Round(shipping * 0.07m, 2);
 
         return new Order
         {
@@ -389,14 +389,14 @@ public static class MockDataFactory
             WarehouseCode = warehouse.Item1,
             WarehouseName = warehouse.Item2,
             OrderTimestamp = DateTime.UtcNow,
-            ExpectedDeliveryDate = DateTime.UtcNow.AddDays(request.ShippingMethod == "1" ? 5 : request.ShippingMethod == "2" ? 1 : 2),
+            ExpectedDeliveryDate = DateTime.UtcNow.AddDays(request.ShippingMethod == "1" ? 3 : request.ShippingMethod == "2" ? 2 : 1),
             Costs = new OrderCosts
             {
                 OrderItemId = Guid.NewGuid(),
                 Subtotal = subtotal,
                 Shipping = shipping,
                 Tax = tax,
-                SmallOrderFee = subtotal < 50 ? 5.00m : null,
+                SmallOrderFee = subtotal <= 50 ? 5.00m : null,
                 BlankCostPerSku = lines.ToDictionary(l => l.Sku, l => l.Price),
                 PaymentMethod = "CreditCard",
                 WarehouseId = warehouse.Item1
@@ -406,7 +406,7 @@ public static class MockDataFactory
             EmailConfirmation = request.EmailConfirmation ?? string.Empty,
             IsTestOrder = request.TestOrder,
             ShippingCarrier = "UPS",
-            TotalBoxes = Math.Max(1, lines.Sum(l => l.Quantity) / 12),
+            TotalBoxes = Math.Max(1, lines.Sum(l => l.Quantity) / 10),
             TotalWeight = lines.Sum(l => l.Quantity) * 0.35m,
             InternalGuid = Guid.NewGuid().ToString()
         };
