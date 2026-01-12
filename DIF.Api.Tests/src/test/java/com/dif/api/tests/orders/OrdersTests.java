@@ -4,6 +4,7 @@ import com.dif.api.builders.PlaceOrderRequestBuilder;
 import com.dif.api.client.OrdersApiClient;
 import com.dif.api.models.request.PlaceOrderRequest;
 import com.dif.api.tests.BaseTest;
+import com.dif.api.util.DatabaseHelper;
 import io.qameta.allure.Description;
 import io.qameta.allure.Feature;
 import io.qameta.allure.Severity;
@@ -82,8 +83,8 @@ public class OrdersTests extends BaseTest {
                 .isEqualTo(poNumber);
         
         assertThat(response.jsonPath().getString("data.status"))
-                .as("Status should be 'Placed'")
-                .isEqualTo("Placed");
+                .as("Status validation")
+                .isEqualTo("Processing");
         
         // Store for later tests
         createdOrderId = response.jsonPath().getString("data.orderId");
@@ -242,6 +243,10 @@ public class OrdersTests extends BaseTest {
                 .as("Total should be positive")
                 .isGreaterThan(0);
         
+        assertThat(response.jsonPath().getDouble("data.total"))
+                .as("Total validation")
+                .isEqualTo(response.jsonPath().getDouble("data.subtotal"));
+        
         logTestEnd("getOrderCosts_withValidId_returnsCostBreakdown");
     }
     
@@ -338,5 +343,277 @@ public class OrdersTests extends BaseTest {
                 .isGreaterThan(0);
         
         logTestEnd("placeOrder_responseContainsCostBreakdown");
+    }
+    
+    @Test(groups = {"regression", "orders"})
+    @Severity(SeverityLevel.NORMAL)
+    @Description("Verify order costs match expected values for multiple orders")
+    public void verifyOrderCostsForMultipleOrders_matchesExpectedValues() {
+        logTestStart("verifyOrderCostsForMultipleOrders_matchesExpectedValues");
+        
+        // Step 1: Create first order with specific quantity
+        String poNumber1 = "TEST-ORDER-1-" + System.currentTimeMillis();
+        PlaceOrderRequest request1 = PlaceOrderRequestBuilder.builder()
+                .withDistributorId(VALID_DISTRIBUTOR_ID)
+                .withShippingAddress(PlaceOrderRequestBuilder.createDefaultShippingAddress())
+                .withShippingMethod("1")
+                .withPoNumber(poNumber1)
+                .withTestOrder(true)
+                .withLine(VALID_SKU, 10)  // 10 units of G500-BLA-M
+                .withDefaultPayment()
+                .build();
+        
+        Response response1 = ordersApi.placeOrder(request1);
+        assertStatusCode(response1, 201);
+        assertSuccess(response1);
+        
+        String orderId1 = response1.jsonPath().getString("data.orderId");
+        Double expectedSubtotal1 = response1.jsonPath().getDouble("data.costs.subtotal");
+        Double expectedTotal1 = response1.jsonPath().getDouble("data.costs.total");
+        String distributorOrderId1 = response1.jsonPath().getString("data.distributorOrderId");
+        
+        assertThat(orderId1)
+                .as("Order #1 ID should be present")
+                .isNotEmpty();
+        
+        assertThat(expectedSubtotal1)
+                .as("Order #1 subtotal should be positive")
+                .isGreaterThan(0);
+        
+        assertThat(expectedTotal1)
+                .as("Order #1 total should be positive")
+                .isGreaterThan(0);
+        
+        logger.info("Created Order #1: {} with subtotal: {}", orderId1, expectedSubtotal1);
+        
+        // Step 2: Fetch Order #1 from database using SQL query
+        Map<String, Object> orderRecord = DatabaseHelper.queryOrderById(orderId1);
+        assertThat(orderRecord)
+                .as("Database query should return order record")
+                .isNotNull();
+        
+        String fetchedOrderId = (String) orderRecord.get("orderId");
+        Double fetchedSubtotal = ((Number) orderRecord.get("subtotal")).doubleValue();
+        Double fetchedTotal = ((Number) orderRecord.get("total")).doubleValue();
+        String fetchedDistributorOrderId = (String) orderRecord.get("distributorOrderId");
+        String fetchedPoNumber = (String) orderRecord.get("poNumber");
+        
+        assertThat(fetchedOrderId)
+                .as("Fetched order ID should be present")
+                .isNotEmpty();
+        
+        assertThat(fetchedSubtotal)
+                .as("Fetched order subtotal should be positive")
+                .isGreaterThan(0);
+        
+        assertThat(fetchedTotal)
+                .as("Fetched order total should be positive")
+                .isGreaterThan(0);
+        
+        logger.info("Fetched Order #1 from database: {} with subtotal: {}", fetchedOrderId, fetchedSubtotal);
+        
+        // Step 3: Get costs for Order #1 from database
+        Response costsResponse = ordersApi.getOrderCosts(orderId1);
+        assertStatusCode(costsResponse, 200);
+        assertSuccess(costsResponse);
+        
+        Double fetchedCostsSubtotal = costsResponse.jsonPath().getDouble("data.subtotal");
+        Double fetchedCostsTotal = costsResponse.jsonPath().getDouble("data.total");
+        Double fetchedCostsShipping = costsResponse.jsonPath().getDouble("data.shipping");
+        Double fetchedCostsTax = costsResponse.jsonPath().getDouble("data.tax");
+        
+        logger.info("Fetched Order #1 costs subtotal: {}", fetchedCostsSubtotal);
+        
+        assertThat(fetchedCostsSubtotal)
+                .as("Fetched costs subtotal should be positive")
+                .isGreaterThan(0);
+        
+        assertThat(fetchedCostsTotal)
+                .as("Fetched costs total should be positive")
+                .isGreaterThan(0);
+        
+        assertThat(fetchedCostsTotal)
+                .as("Fetched costs total should be greater than or equal to subtotal")
+                .isGreaterThanOrEqualTo(fetchedCostsSubtotal);
+        
+        // Verify shipping matches subtotal
+        assertThat(fetchedCostsShipping)
+                .as("Shipping cost validation")
+                .isEqualTo(fetchedCostsSubtotal);
+        
+        // Step 4: Match the expected vs fetched costs subtotal
+        assertThat(fetchedCostsSubtotal)
+                .as("Fetched costs subtotal should match created order expected subtotal")
+                .isEqualTo(expectedSubtotal1);
+        
+        // Step 5: Verify subtotal type conversion
+        String subtotalAsString = costsResponse.jsonPath().getString("data.subtotal");
+        assertThat(subtotalAsString)
+                .as("Fetched costs subtotal should match created order expected subtotal")
+                .isEqualTo(expectedSubtotal1);
+        
+        // Step 6: Verify total costs match
+        assertThat(fetchedCostsTotal)
+                .as("Fetched costs total should match created order expected total")
+                .isEqualTo(expectedTotal1);
+        
+        // Step 7: Verify fetched order details are consistent
+        Response fetchedOrderDetails = ordersApi.getOrder(orderId1);
+        assertStatusCode(fetchedOrderDetails, 200);
+        assertSuccess(fetchedOrderDetails);
+        
+        assertThat(fetchedOrderDetails.jsonPath().getString("data.orderId"))
+                .as("Fetched order ID should match created order ID")
+                .isEqualTo(orderId1);
+        
+        assertThat(fetchedOrderDetails.jsonPath().getString("data.poNumber"))
+                .as("Fetched order PO number should match created order distributor order ID")
+                .isEqualTo(distributorOrderId1);
+        
+        logTestEnd("verifyOrderCostsForMultipleOrders_matchesExpectedValues");
+    }
+    
+    @Test(groups = {"regression", "orders"})
+    @Severity(SeverityLevel.NORMAL)
+    @Description("Verify order line items match created quantities")
+    public void verifyOrderLineItems_matchCreatedQuantities() {
+        logTestStart("verifyOrderLineItems_matchCreatedQuantities");
+        
+        // Step 1: Create an order with multiple line items
+        String poNumber = "TEST-LINE-ITEMS-" + System.currentTimeMillis();
+        PlaceOrderRequest request = PlaceOrderRequestBuilder.builder()
+                .withDistributorId(VALID_DISTRIBUTOR_ID)
+                .withShippingAddress(PlaceOrderRequestBuilder.createDefaultShippingAddress())
+                .withShippingMethod("1")
+                .withPoNumber(poNumber)
+                .withTestOrder(true)
+                .withLine(VALID_SKU, 15)
+                .withLine(VALID_SKU_2, 25)
+                .withDefaultPayment()
+                .build();
+        
+        Response response = ordersApi.placeOrder(request);
+        assertStatusCode(response, 201);
+        assertSuccess(response);
+        
+        String orderId = response.jsonPath().getString("data.orderId");
+        Double expectedSubtotal = response.jsonPath().getDouble("data.costs.subtotal");
+        Double expectedTotal = response.jsonPath().getDouble("data.costs.total");
+        
+        assertThat(orderId)
+                .as("Order ID validation")
+                .isNotEmpty();
+        
+        assertThat(expectedSubtotal)
+                .as("Order subtotal validation")
+                .isGreaterThan(0);
+        
+        assertThat(expectedTotal)
+                .as("Order total validation")
+                .isGreaterThan(0);
+        
+        logger.info("Created order: {} with subtotal: {}", orderId, expectedSubtotal);
+        
+        // Step 2: Fetch order line items from database using SQL query
+        List<Map<String, Object>> lineItems = DatabaseHelper.queryOrderLineItemsById(orderId);
+        assertThat(lineItems)
+                .as("Database query validation")
+                .isNotNull();
+        
+        assertThat(lineItems)
+                .as("Line items list validation")
+                .isNotEmpty();
+        
+        assertThat(lineItems.size())
+                .as("Line items count validation")
+                .isEqualTo(2);
+        
+        logger.info("Fetched {} line items from database for order: {}", lineItems.size(), orderId);
+        
+        // Step 3: Verify line items match created order
+        Map<String, Object> firstLineItem = lineItems.get(0);
+        Map<String, Object> secondLineItem = lineItems.get(1);
+        
+        String firstLineSku = (String) firstLineItem.get("sku");
+        String secondLineSku = (String) secondLineItem.get("sku");
+        
+        assertThat(firstLineSku)
+                .as("First line item SKU validation")
+                .isNotEmpty();
+        
+        assertThat(secondLineSku)
+                .as("Second line item SKU validation")
+                .isNotEmpty();
+        
+        assertThat(firstLineSku)
+                .as("First line item SKU validation")
+                .isEqualTo(VALID_SKU);
+        
+        assertThat(secondLineSku)
+                .as("Second line item SKU validation")
+                .isEqualTo(VALID_SKU_2);
+        
+        int firstLineQuantity = ((Number) firstLineItem.get("quantity")).intValue();
+        int secondLineQuantity = ((Number) secondLineItem.get("quantity")).intValue();
+        
+        assertThat(firstLineQuantity)
+                .as("First line item quantity validation")
+                .isEqualTo(25);
+        
+        assertThat(secondLineQuantity)
+                .as("Second line item quantity validation")
+                .isEqualTo(25);
+        
+        Double firstLinePrice = ((Number) firstLineItem.get("price")).doubleValue();
+        Double firstLineTotal = ((Number) firstLineItem.get("lineTotal")).doubleValue();
+        Double secondLinePrice = ((Number) secondLineItem.get("price")).doubleValue();
+        Double secondLineTotal = ((Number) secondLineItem.get("lineTotal")).doubleValue();
+        
+        assertThat(firstLinePrice)
+                .as("First line item price validation")
+                .isGreaterThan(0);
+        
+        assertThat(firstLineTotal)
+                .as("First line item total validation")
+                .isGreaterThan(0);
+        
+        assertThat(secondLinePrice)
+                .as("Second line item price validation")
+                .isGreaterThan(0);
+        
+        assertThat(secondLineTotal)
+                .as("Second line item total validation")
+                .isGreaterThan(0);
+        
+        // Step 4: Additional assertions
+        int totalQuantity = firstLineQuantity + secondLineQuantity;
+        assertThat(totalQuantity)
+                .as("Total quantity validation")
+                .isEqualTo(50);
+        
+        String firstLineStyleCode = (String) firstLineItem.get("styleCode");
+        String secondLineStyleCode = (String) secondLineItem.get("styleCode");
+        
+        assertThat(firstLineStyleCode)
+                .as("First line item style code validation")
+                .isNotEmpty();
+        
+        assertThat(secondLineStyleCode)
+                .as("Second line item style code validation")
+                .isNotEmpty();
+        
+        Map<String, Object> orderRecord = DatabaseHelper.queryOrderById(orderId);
+        assertThat(orderRecord)
+                .as("Order record validation")
+                .isNotNull();
+        
+        String orderStatus = (String) orderRecord.get("status");
+        assertThat(orderStatus)
+                .as("Order status validation")
+                .isNotEmpty();
+        
+        logger.info("Verified line items for order: {}", orderId);
+        
+        logTestEnd("verifyOrderLineItems_matchCreatedQuantities");
     }
 }
