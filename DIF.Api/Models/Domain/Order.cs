@@ -205,7 +205,7 @@ public class OrderCosts
     /// <summary>
     /// Tax amount.
     /// </summary>
-    public decimal Tax { get; set; }
+    public decimal? Tax { get; set; }
 
     /// <summary>
     /// Small order fee if applicable.
@@ -215,7 +215,7 @@ public class OrderCosts
     /// <summary>
     /// Total order cost.
     /// </summary>
-    public decimal Total => Subtotal + Shipping + Tax + (SmallOrderFee ?? 0);
+    public decimal Total => Subtotal + Shipping + (Tax ?? 0) + (SmallOrderFee ?? 0);
 
     /// <summary>
     /// Per-SKU blank costs stored as JSON or dictionary.

@@ -72,7 +72,7 @@ public class MockRateLimitService : IRateLimitService
             ? config.RequestsPerMinute + config.BurstAllowance
             : config.ThresholdRequestCount;
 
-        return Task.FromResult(config.CurrentRequestCount < limit);
+        return Task.FromResult(config.CurrentRequestCount <= limit);
     }
 
     /// <inheritdoc />

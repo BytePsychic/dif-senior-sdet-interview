@@ -276,6 +276,12 @@ public class TrackingTests extends BaseTest {
                 .as("Should return 200 or 404")
                 .isIn(200, 404);
         
+        if (statusCode == 200) {
+            assertThat(response.jsonPath().getString("data"))
+                    .as("Delivery confirmation data should be present")
+                    .isNotNull();
+        }
+        
         logTestEnd("getDeliveryConfirmation_withValidId_returnsConfirmation");
     }
     
@@ -293,6 +299,89 @@ public class TrackingTests extends BaseTest {
         assertFailure(response);
         
         logTestEnd("getDeliveryConfirmation_withInvalidId_returns404");
+    }
+    
+    @Test(groups = {"regression", "tracking"})
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verify tracking shipment has correct leg type")
+    public void getTrackingByOrderId_hasCorrectLegType() {
+        logTestStart("getTrackingByOrderId_hasCorrectLegType");
+        
+        if (createdOrderId == null) {
+            logger.warn("Skipping test - no order was created");
+            return;
+        }
+        
+        Response response = trackingApi.getTrackingByOrderId(createdOrderId);
+        
+        int statusCode = response.getStatusCode();
+        if (statusCode == 200) {
+            assertSuccess(response);
+            String legType = response.jsonPath().getString("data.legType");
+            assertThat(legType)
+                    .as("Leg type should be L1 for distributor-to-printer shipments")
+                    .isEqualTo("L1");
+        }
+        
+        logTestEnd("getTrackingByOrderId_hasCorrectLegType");
+    }
+    
+    @Test(groups = {"regression", "tracking"})
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verify batch tracking update processes all pending shipments")
+    public void triggerTrackingUpdate_processesAllPendingShipments() {
+        logTestStart("triggerTrackingUpdate_processesAllPendingShipments");
+        
+        Response pendingResponse = trackingApi.getPendingShipments();
+        assertStatusCode(pendingResponse, 200);
+        assertSuccess(pendingResponse);
+        
+        List<Map<String, Object>> pendingShipments = pendingResponse.jsonPath().getList("data");
+        int pendingCount = pendingShipments.size();
+        
+        TrackingUpdateRequest request = TrackingUpdateRequest.builder()
+                .distributorId(VALID_DISTRIBUTOR_ID)
+                .build();
+        
+        Response updateResponse = trackingApi.triggerTrackingUpdate(request);
+        assertStatusCode(updateResponse, 200);
+        assertSuccess(updateResponse);
+        
+        int shipmentsUpdated = updateResponse.jsonPath().getInt("data.shipmentsUpdated");
+        assertThat(shipmentsUpdated)
+                .as("All pending shipments should be processed")
+                .isEqualTo(pendingCount);
+        
+        logTestEnd("triggerTrackingUpdate_processesAllPendingShipments");
+    }
+    
+    @Test(groups = {"regression", "tracking"})
+    @Severity(SeverityLevel.NORMAL)
+    @Description("Verify delivery confirmation has correct fields when order is delivered")
+    public void getDeliveryConfirmation_whenDelivered_hasCorrectFields() {
+        logTestStart("getDeliveryConfirmation_whenDelivered_hasCorrectFields");
+        
+        if (createdOrderId == null) {
+            logger.warn("Skipping test - no order was created");
+            return;
+        }
+        
+        Response response = trackingApi.getDeliveryConfirmation(createdOrderId);
+        
+        int statusCode = response.getStatusCode();
+        if (statusCode == 200) {
+            assertSuccess(response);
+            String deliveryDate = response.jsonPath().getString("data.deliveryDate");
+            assertThat(deliveryDate)
+                    .as("Delivery date should be present")
+                    .isNotEmpty();
+            
+            assertThat(deliveryDate)
+                    .as("Delivery date format validation")
+                    .matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z");
+        }
+        
+        logTestEnd("getDeliveryConfirmation_whenDelivered_hasCorrectFields");
     }
     
     @Test(groups = {"smoke", "tracking"})

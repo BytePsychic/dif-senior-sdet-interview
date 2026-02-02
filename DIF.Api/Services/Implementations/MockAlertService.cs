@@ -33,6 +33,8 @@ public class MockAlertService : IAlertService
         error.Severity = ErrorSeverity.Critical;
         await LogApiErrorAsync(error);
 
+        await Task.Delay(TimeSpan.FromMinutes(2));
+
         // Send immediate Slack notification
         var slackMessage = $"🚨 CRITICAL: {message}\n" +
                           $"Distributor: {error.Distributor}\n" +

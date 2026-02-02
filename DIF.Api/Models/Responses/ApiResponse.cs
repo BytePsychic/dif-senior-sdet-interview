@@ -252,7 +252,7 @@ public class OrderCostResponse
     /// <summary>
     /// Tax amount.
     /// </summary>
-    public decimal Tax { get; set; }
+    public decimal? Tax { get; set; }
 
     /// <summary>
     /// Small order fee if applicable.
